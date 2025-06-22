@@ -39,25 +39,25 @@ class AdjustedSMAPELoss(nn.Module):
 
 def calculate_ad_smape_grouped_by(df_pred, df_true, eval_metric):
     # Standardizing column names for merge
-    if '칼라' in df_pred.columns and '칼라명2' in df_true.columns:
-        df_true_renamed = df_true.rename(columns={'칼라명2': '칼라'})
-        df = df_pred.merge(df_true_renamed[['상품코드', '칼라', '카테고리']], how='left', on=['상품코드', '칼라'])
-    elif '상품코드' in df_pred.columns and '상품코드' in df_true.columns and '카테고리' in df_true.columns:
-        df = df_pred.merge(df_true[['상품코드', '카테고리']], how='left', on='상품코드')
+    if 'color_code' in df_pred.columns and 'color_name_2' in df_true.columns:
+        df_true_renamed = df_true.rename(columns={'color_name_2': 'color_code'})
+        df = df_pred.merge(df_true_renamed[['product_code', 'color_code', 'category']], how='left', on=['product_code', 'color_code'])
+    elif 'product_code' in df_pred.columns and 'product_code' in df_true.columns and 'category' in df_true.columns:
+        df = df_pred.merge(df_true[['product_code', 'category']], how='left', on='product_code')
     else:
         # Fallback or error if key columns for grouping are missing
         print("Warning: Key columns for grouping in calculate_ad_smape_grouped_by are missing.")
         return {}
 
-    cats = df['카테고리'].unique()
+    cats = df['category'].unique()
     dictionary = {}
 
     for cat in cats:
         if pd.isna(cat): # Handle potential NaN categories
             continue
-        x = df[df['카테고리'] == cat]
-        y1 = torch.tensor(x['판매수량_true'].values, dtype=torch.float32)
-        y2 = torch.tensor(x['판매수량_pred'].values, dtype=torch.float32)
+        x = df[df['category'] == cat]
+        y1 = torch.tensor(x['sales_quantity_true'].values, dtype=torch.float32)
+        y2 = torch.tensor(x['sales_quantity_pred'].values, dtype=torch.float32)
 
         eval_score = eval_metric(y1, y2)
         dictionary[cat] = eval_score.item() if hasattr(eval_score, 'item') else eval_score
@@ -87,7 +87,7 @@ class nsr_img_txt_dataset(Dataset):
 
     def __getitem__(self, idx):
         row = self.dataframe.iloc[idx]
-        image_paths_str = row['이미지파일']
+        image_paths_str = row['image_files']
 
         # Robustly evaluate image_paths_str
         try:
@@ -101,11 +101,11 @@ class nsr_img_txt_dataset(Dataset):
             image_paths = [str(image_paths_str)]
 
 
-        text_embeddings = row.filter(like='설명').values.astype(np.float32)
-        target = row['판매수량']
-        target_scaled = row.get('판매수량_scaled', None) # Use .get for optional column
+        text_embeddings = row.filter(like='description').values.astype(np.float32) # Changed from '설명'
+        target = row['sales_quantity']
+        target_scaled = row.get('sales_quantity_scaled', None) # Use .get for optional column
 
-        other_embeddings_cols = row.drop(labels=row.filter(like='설명').index.tolist() + ['판매수량','이미지파일','판매수량_scaled'], errors='ignore')
+        other_embeddings_cols = row.drop(labels=row.filter(like='description').index.tolist() + ['sales_quantity','image_files','sales_quantity_scaled'], errors='ignore') # Changed from '설명'
         other_embeddings = other_embeddings_cols.values.astype(np.float32)
 
         images = []
@@ -527,8 +527,8 @@ def predict_and_evaluate(model, dataloader, device, df_original, df_true_for_gro
     # Ensure alignment if df_preds was from a shuffled dataloader (not typical for test)
     # This assumes df_preds corresponds row-wise to the dataloader's iteration order.
     # If dataloader was shuffled, original indices would be needed.
-    df_preds['판매수량_pred'] = np.round(predictions_list[:len(df_preds)], 2) # Truncate if preds are more than df rows
-    df_preds['판매수량_true'] = df_original['판매수량'] # Ensure true values are present for comparison
+    df_preds['sales_quantity_pred'] = np.round(predictions_list[:len(df_preds)], 2) # Truncate if preds are more than df rows
+    df_preds['sales_quantity_true'] = df_original['sales_quantity'] # Ensure true values are present for comparison
 
     pred_csv_path = os.path.join(output_dir, f"{dataset_name}_predictions.csv")
     df_preds.to_csv(pred_csv_path, encoding='utf-8', index=False)
@@ -536,15 +536,15 @@ def predict_and_evaluate(model, dataloader, device, df_original, df_true_for_gro
 
     # Grouped evaluation (if applicable)
     if df_true_for_grouping is not None:
-        # For item_code level (상품코드별)
+        # For item_code level (product_code별)
         df_item_agg = pd.DataFrame()
-        df_item_agg['상품코드'] = df_preds['상품코드'].unique()
-        df_item_agg = df_item_agg.merge(df_preds.groupby('상품코드')['판매수량_true'].sum().reset_index(), on='상품코드', how='left')
-        df_item_agg = df_item_agg.merge(df_preds.groupby('상품코드')['판매수량_pred'].sum().reset_index(), on='상품코드', how='left')
+        df_item_agg['product_code'] = df_preds['product_code'].unique()
+        df_item_agg = df_item_agg.merge(df_preds.groupby('product_code')['sales_quantity_true'].sum().reset_index(), on='product_code', how='left')
+        df_item_agg = df_item_agg.merge(df_preds.groupby('product_code')['sales_quantity_pred'].sum().reset_index(), on='product_code', how='left')
         df_item_agg.to_csv(os.path.join(output_dir, f"{dataset_name}_item_level_preds.csv"), encoding='utf-8', index=False)
 
-        item_level_eval = eval_metric(torch.tensor(df_item_agg['판매수량_pred'].values, dtype=torch.float32),
-                                      torch.tensor(df_item_agg['판매수량_true'].values, dtype=torch.float32)).item()
+        item_level_eval = eval_metric(torch.tensor(df_item_agg['sales_quantity_pred'].values, dtype=torch.float32),
+                                      torch.tensor(df_item_agg['sales_quantity_true'].values, dtype=torch.float32)).item()
         print(f"{dataset_name} Item-Level Eval Metric: {item_level_eval:.4f}")
 
         # Category-wise for item_code level

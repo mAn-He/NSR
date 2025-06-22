@@ -99,9 +99,9 @@ def main():
 
     # Drop unnecessary columns (common across original scripts)
     # Note: 'Unnamed: 0' might be an index column, handled by index_col in read_csv for knn variant
-    cols_to_drop = ['Unnamed: 0', '판매시작연도', '판매첫날', '상품코드', '판매일자', '상품명', '상품명2',
-                    '칼라', '칼라명', '칼라명2', '현재가', '할인율(%)', '파일경로',
-                    '이미지갯수', '외관설명', '기능설명','카테고리']
+    cols_to_drop = ['Unnamed: 0', 'sale_start_year', 'first_sale_day', 'product_code', 'sale_date', 'product_name', 'product_name_2',
+                    'color_code', 'color_name', 'color_name_2', 'current_price', 'discount_rate_percent', 'image_path',
+                    'image_count', 'appearance_description', 'function_description','category']
     if not args.use_knn_features: # KNN script has different drop logic post get_nearest_neighbors
          df_train = df_train_orig.drop(columns=cols_to_drop, errors='ignore')
          df_test = df_test_orig.drop(columns=cols_to_drop, errors='ignore')
@@ -111,7 +111,7 @@ def main():
 
 
     # Keep original dataframes for grouping in final evaluation (as done in week16_engines5.py)
-    # These should have the '카테고리' column if it was originally present for grouping
+    # These should have the 'category' column if it was originally present for grouping
     df_train_true_for_grouping = pd.read_csv(args.train_dataset, index_col=0 if 'train_knn' in args.train_dataset else None)
     df_test_true_for_grouping = pd.read_csv(args.test_dataset, index_col=0 if 'train_knn' in args.test_dataset else None)
 
@@ -120,8 +120,8 @@ def main():
     a_param, b_param, lambda_train_boxcox = None, None, None
     is_scaled_target_used = False
     if args.target_scaling == 'boxcox_custom':
-        y_train = np.array(df_train['판매수량'].tolist())
-        # y_test = np.array(df_test['판매수량'].tolist()) # Not used for fitting lambda
+        y_train = np.array(df_train['sales_quantity'].tolist())
+        # y_test = np.array(df_test['sales_quantity'].tolist()) # Not used for fitting lambda
 
         # Ensure positivity for boxcox
         if (y_train <= 0).any():
@@ -134,7 +134,7 @@ def main():
         # Custom scaling parameters 'a' and 'b'
         # Ensure quantiles are calculated on the original y_train (before +1 offset if applied for boxcox only)
         # This part needs careful check if y_train was modified for boxcox input only
-        y_train_for_quantiles = np.array(df_train_orig['판매수량'].tolist())
+        y_train_for_quantiles = np.array(df_train_orig['sales_quantity'].tolist())
         if (y_train_for_quantiles <=0).any() and (y_train == y_train_for_quantiles + 1).all():
              # if y_train was y_train_for_quantiles + 1, then (y_train_for_quantiles**lambda) might be problematic
              # The original scripts apply boxcox directly, implying y_train must be positive.
@@ -157,19 +157,19 @@ def main():
         a_param = 2 / (term_lower - term_upper)
         b_param = a_param * term_lower - 1
 
-        df_train['판매수량_scaled'] = np.round(a_param * boxcox_y_train - b_param, 4)
+        df_train['sales_quantity_scaled'] = np.round(a_param * boxcox_y_train - b_param, 4)
 
         # Apply to test set using train lambda
-        y_test_orig = np.array(df_test['판매수량'].tolist())
+        y_test_orig = np.array(df_test['sales_quantity'].tolist())
         if (y_test_orig <= 0).any(): y_test_orig = y_test_orig + 1 # Consistent shift if train was shifted
         boxcox_y_test = boxcox(y_test_orig, lmbda=lambda_train_boxcox)
-        df_test['판매수량_scaled'] = np.round(a_param * boxcox_y_test - b_param, 4)
+        df_test['sales_quantity_scaled'] = np.round(a_param * boxcox_y_test - b_param, 4)
 
         is_scaled_target_used = True
         print(f"Applied custom BoxCox scaling. Lambda={lambda_train_boxcox:.4f}, a={a_param:.4f}, b={b_param:.4f}")
     else: # 'none'
-        df_train['판매수량_scaled'] = df_train['판매수량'] # Or handle absence in dataset/engine
-        df_test['판매수량_scaled'] = df_test['판매수량']
+        df_train['sales_quantity_scaled'] = df_train['sales_quantity'] # Or handle absence in dataset/engine
+        df_test['sales_quantity_scaled'] = df_test['sales_quantity']
         print("No target scaling applied.")
 
     # KNN Feature Engineering (conditional)
@@ -183,21 +183,21 @@ def main():
             image_embedding_dim=args.image_embeddings_dim_out # This was image_embeddings_dim_out in train_knn
         )
         # train_knn.py drops more columns AFTER this step. Replicate that.
-        cols_to_drop_knn = ['Unnamed: 0', '판매시작연도', '판매첫날', '상품코드', '판매일자', '상품명', '상품명2',
-                            '칼라', '칼라명', '칼라명2', '현재가', '할인율(%)', '파일경로',
-                            '이미지갯수', '외관설명', '기능설명','카테고리',
+        cols_to_drop_knn = ['Unnamed: 0', 'sale_start_year', 'first_sale_day', 'product_code', 'sale_date', 'product_name', 'product_name_2',
+                            'color_code', 'color_name', 'color_name_2', 'current_price', 'discount_rate_percent', 'image_path',
+                            'image_count', 'appearance_description', 'function_description','category',
                             f'{args.k_neighbors} closest idx'] #This column is created by get_nearest_neighbors
         df_train = df_train.drop(columns=cols_to_drop_knn, errors='ignore')
         # Ensure test_df has same columns as train_df before dataloader
-        df_test = df_test[df_train.columns.drop('판매수량_scaled',errors='ignore').tolist() + ['판매수량_scaled']]
+        df_test = df_test[df_train.columns.drop('sales_quantity_scaled',errors='ignore').tolist() + ['sales_quantity_scaled']]
 
 
     # Define embedding dimensions (after potential KNN processing)
-    text_embedding_dim_in = len(df_train.filter(like='설명').columns)
+    text_embedding_dim_in = len(df_train.filter(like='description').columns) # Changed from '설명'
     # Careful with column subtractions for other_features_dim_in
-    # Base columns: all except '판매수량', '이미지파일', '판매수량_scaled', and text description columns
-    potential_other_cols = df_train.drop(columns=df_train.filter(like='설명').columns.tolist() + \
-                                           ['판매수량', '이미지파일', '판매수량_scaled'], errors='ignore')
+    # Base columns: all except 'sales_quantity', 'image_files', 'sales_quantity_scaled', and text description columns
+    potential_other_cols = df_train.drop(columns=df_train.filter(like='description').columns.tolist() + \
+                                           ['sales_quantity', 'image_files', 'sales_quantity_scaled'], errors='ignore') # Changed from '설명'
     other_features_dim_in = potential_other_cols.shape[1]
 
     # If KNN features were added, they are part of other_features_dim_in
